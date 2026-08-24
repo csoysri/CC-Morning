@@ -2,7 +2,7 @@ name: CNBC Radio Auto Recorder
 
 on:
   schedule:
-    - cron: '30 18 * * *' # รันตี 1:30 ทุกวัน (เวลาไทย)
+    - cron: '0 23 * * *' # รัน 06:00 น. ทุกวัน (เวลาไทย)
   workflow_dispatch:
 
 jobs:

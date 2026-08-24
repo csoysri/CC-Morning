@@ -1,0 +1,57 @@
+name: CNBC Radio Auto Recorder
+
+on:
+  schedule:
+    - cron: '30 18 * * *' # รันตี 1:30 ทุกวัน (เวลาไทย)
+  workflow_dispatch:
+
+jobs:
+  record_and_upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # 🎬 ติดตั้ง FFmpeg สำหรับอัดและแปลงเสียง
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      # ⚡ ติดตั้ง Library ของ Python
+      - name: Install Python Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install google-genai edge-tts
+
+      # 🎙️ รันโปรแกรมบันทึกเสียง
+      - name: Run Recorder Script
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python recorder.py
+
+      # ☁️ ติดตั้ง Rclone
+      - name: Install Rclone
+        run: |
+          sudo -v ; curl https://rclone.org/install.sh | sudo bash
+
+      # 📤 อัปโหลดเข้า Google Drive
+      - name: Setup Rclone and Upload
+        env:
+          RCLONE_CONF_DATA: ${{ secrets.RCLONE_CONFIG }}
+        run: |
+          mkdir -p ~/.config/rclone
+          echo "$RCLONE_CONF_DATA" > ~/.config/rclone/rclone.conf
+          
+          TARGET_FOLDER="CNBC/$(TZ='Asia/Bangkok' date +'%Y-%m-%d')"
+          
+          echo "=== กำลังย้ายไฟล์ทั้งหมดเข้าโฟลเดอร์: $TARGET_FOLDER ==="
+          
+          rclone move ./ "mydrive:$TARGET_FOLDER" --include "*.mp3" --include "*.txt" --verbose

@@ -10,8 +10,8 @@ from google import genai
 
 TARGET_URL = "https://cdn-fr1-eu.lncoperations.ee/hls/cnbc_live/index.m3u8" 
 
-# 🛠️ รับค่าเวลาจาก GitHub Actions หรือถ้าไม่มีให้ใช้ 10800 วินาที (3 ชั่วโมง)
-RECORD_DURATION = int(os.getenv("RECORD_DURATION", 10800))
+# 🛠️ รับค่าเวลาจาก GitHub Actions หรือถ้าไม่มีให้ใช้ 14400 วินาที (4 ชั่วโมง)
+RECORD_DURATION = int(os.getenv("RECORD_DURATION", 14400))
 SEGMENT_DURATION = 420  
 
 # 🔑 ดึง Key จาก GitHub Secret อัตโนมัติ

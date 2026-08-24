@@ -10,9 +10,9 @@ from google import genai
 
 TARGET_URL = "https://cdn-fr1-eu.lncoperations.ee/hls/cnbc_live/index.m3u8" 
 
-# 🛠️ ตั้งเวลาทดสอบ: อัด 14400/ 30 วินาที / ตัดท่อนละ 420 / 15 วินาที
-RECORD_DURATION = 30
-SEGMENT_DURATION = 15  
+# 🛠️ รับค่าเวลาจาก GitHub Actions หรือถ้าไม่มีให้ใช้ 10800 วินาที (3 ชั่วโมง)
+RECORD_DURATION = int(os.getenv("RECORD_DURATION", 10800))
+SEGMENT_DURATION = 420  
 
 # 🔑 ดึง Key จาก GitHub Secret อัตโนมัติ
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -21,7 +21,8 @@ client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 def record_stream(output_filename, duration):
     """บันทึกเสียงสดจาก CNBC เป็นไฟล์ .mp3"""
     print("🤖 เริ่มต้นทำงานระบบบันทึกเสียงอัตโนมัติ...")
-    print(f"🎙️ กำลังบันทึกเสียงเป็นไฟล์ MP3 เป็นเวลา {duration} วินาที...")
+    print(f"🎙️ กำลังบันทึกเสียงเป็นไฟล์ MP3 (สูงสุด {duration} วินาที)...")
+    print("🛑 หากรันบนคอมของคุณเอง สามารถกด [Ctrl + C] เพื่อหยุดอัดและทำขั้นตอนต่อไปได้ทันที!\n")
     
     headers = (
         "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n"
@@ -43,10 +44,19 @@ def record_stream(output_filename, duration):
         output_filename
     ]
     
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"❌ FFmpeg Error:\n{result.stderr}")
-        return False
+    # ใช้ Popen แทน run เพื่อให้โปรแกรมดักจับการกดปุ่มหยุดได้
+    process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    
+    try:
+        process.wait() # รอจนกว่าจะครบเวลา
+    except KeyboardInterrupt:
+        # เมื่อผู้ใช้กด Ctrl + C (กดหยุด)
+        print("\n🛑 ตรวจพบการกดหยุด! กำลังเซฟไฟล์และไปขั้นตอนต่อไป (ใช้เวลา 1-2 วินาที)...")
+        try:
+            # ส่งตัวอักษร 'q' ไปให้ FFmpeg เพื่อหยุดบันทึกอย่างปลอดภัยและสมบูรณ์
+            process.communicate(input=b'q', timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
         
     return os.path.exists(output_filename) and os.path.getsize(output_filename) > 0
 
@@ -63,7 +73,7 @@ def split_audio(input_file, date_prefix, segment_time=15):
         '-c', 'copy',
         output_pattern
     ]
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     segments = sorted(glob.glob(f"./{date_prefix}_part_*.mp3"))
     print(f"🎉 ตัดไฟล์สำเร็จ! ได้ทั้งหมด {len(segments)} ไฟล์\n")
     return segments
@@ -153,4 +163,4 @@ if __name__ == "__main__":
             
         print("✨ ประมวลผลครบทุกไฟล์เรียบร้อยแล้ว!")
     else:
-        print("❌ การบันทึกเสียงล้มเหลว")
+        print("❌ การบันทึกเสียงล้มเหลว หรือไม่มีข้อมูลถูกบันทึก")

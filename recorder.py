@@ -1,4 +1,5 @@
 import os
+import sys
 import subprocess
 import glob
 import time
@@ -10,8 +11,8 @@ from google import genai
 
 TARGET_URL = "https://cdn-fr1-eu.lncoperations.ee/hls/cnbc_live/index.m3u8" 
 
-# 🛠️ รับค่าเวลาจาก GitHub Actions หรือถ้าไม่มีให้ใช้ 14400 วินาที (4 ชั่วโมง)
-RECORD_DURATION = int(os.getenv("RECORD_DURATION", 14400))
+# 🛠️ ตั้งเวลา: อัด 4 ชั่วโมง (14400 วินาที) / ตัดท่อนละ 7 นาที (420 วินาที)
+RECORD_DURATION = 14400  
 SEGMENT_DURATION = 420  
 
 # 🔑 ดึง Key จาก GitHub Secret อัตโนมัติ
@@ -21,8 +22,7 @@ client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 def record_stream(output_filename, duration):
     """บันทึกเสียงสดจาก CNBC เป็นไฟล์ .mp3"""
     print("🤖 เริ่มต้นทำงานระบบบันทึกเสียงอัตโนมัติ...")
-    print(f"🎙️ กำลังบันทึกเสียงเป็นไฟล์ MP3 (สูงสุด {duration} วินาที)...")
-    print("🛑 หากรันบนคอมของคุณเอง สามารถกด [Ctrl + C] เพื่อหยุดอัดและทำขั้นตอนต่อไปได้ทันที!\n")
+    print(f"🎙️ กำลังบันทึกเสียงเป็นไฟล์ MP3 เป็นเวลา {duration} วินาที...")
     
     headers = (
         "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n"
@@ -31,6 +31,7 @@ def record_stream(output_filename, duration):
 
     cmd = [
         'ffmpeg', '-y',
+        '-loglevel', 'error',  # 👈 ลดการพิมพ์ Log ป้องกัน Buffer เต็ม
         '-headers', headers,
         '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
         '-reconnect', '1',
@@ -44,20 +45,13 @@ def record_stream(output_filename, duration):
         output_filename
     ]
     
-    # ใช้ Popen แทน run เพื่อให้โปรแกรมดักจับการกดปุ่มหยุดได้
-    process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # 👈 ปิดการเก็บ Log ออกมาที่ Python เพื่อป้องกันอาการค้าง
+    result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) 
     
-    try:
-        process.wait() # รอจนกว่าจะครบเวลา
-    except KeyboardInterrupt:
-        # เมื่อผู้ใช้กด Ctrl + C (กดหยุด)
-        print("\n🛑 ตรวจพบการกดหยุด! กำลังเซฟไฟล์และไปขั้นตอนต่อไป (ใช้เวลา 1-2 วินาที)...")
-        try:
-            # ส่งตัวอักษร 'q' ไปให้ FFmpeg เพื่อหยุดบันทึกอย่างปลอดภัยและสมบูรณ์
-            process.communicate(input=b'q', timeout=3)
-        except subprocess.TimeoutExpired:
-            process.kill()
+    if result.returncode != 0:
+        print("❌ FFmpeg สิ้นสุดการทำงานแบบมีข้อผิดพลาด (หรือถูกสั่ง Cancel)")
         
+    # คืนค่า True เสมอถ้ามีไฟล์ถูกสร้างขึ้น (ถึงแม้จะถูก Cancel กลางคันก็ยังได้ไฟล์เท่าที่อัดทัน)
     return os.path.exists(output_filename) and os.path.getsize(output_filename) > 0
 
 def split_audio(input_file, date_prefix, segment_time=15):
@@ -73,7 +67,8 @@ def split_audio(input_file, date_prefix, segment_time=15):
         '-c', 'copy',
         output_pattern
     ]
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # ป้องกัน Log ค้างในสเตปการตัดไฟล์ด้วย
+    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     segments = sorted(glob.glob(f"./{date_prefix}_part_*.mp3"))
     print(f"🎉 ตัดไฟล์สำเร็จ! ได้ทั้งหมด {len(segments)} ไฟล์\n")
     return segments
@@ -146,14 +141,31 @@ def process_single_file(seg_path, current_idx, total_files):
     print(f"🎉 เสร็จสิ้นขั้นตอนของไฟล์ [{current_idx}/{total_files}]\n")
 
 if __name__ == "__main__":
-    th_time = datetime.now(ZoneInfo("Asia/Bangkok"))
-    date_str = th_time.strftime('%Y%m%d_%H%M%S')
-    main_file = f"./raw_cnbc_{date_str}.mp3"
+    # ตรวจสอบคำสั่งที่ส่งเข้ามา (record, process หรือรันทั้งหมดแบบเดิม)
+    mode = sys.argv[1] if len(sys.argv) > 1 else "all"
 
-    success = record_stream(main_file, RECORD_DURATION)
+    if mode in ["record", "all"]:
+        th_time = datetime.now(ZoneInfo("Asia/Bangkok"))
+        date_str = th_time.strftime('%Y%m%d_%H%M%S')
+        main_file = f"./raw_cnbc_{date_str}.mp3"
 
-    if success:
-        print(f"✅ บันทึกไฟล์หลักสำเร็จ: {main_file}")
+        success = record_stream(main_file, RECORD_DURATION)
+        if success:
+            print(f"✅ สิ้นสุดการบันทึกไฟล์: {main_file}")
+        else:
+            print("⚠️ การบันทึกเสียงสิ้นสุดลง (หรือถูกสั่งยกเลิก แต่ไม่มีไฟล์เหลืออยู่)")
+
+    if mode in ["process", "all"]:
+        # ค้นหาไฟล์ .mp3 ต้นฉบับล่าสุดที่เพิ่งอัดไว้
+        raw_files = glob.glob("./raw_cnbc_*.mp3")
+        if not raw_files:
+            print("❌ ไม่พบไฟล์เสียงต้นฉบับสำหรับประมวลผล")
+            sys.exit(0)
+        
+        main_file = max(raw_files, key=os.path.getctime)
+        date_str = os.path.basename(main_file).replace("raw_cnbc_", "").replace(".mp3", "")
+
+        print(f"🔄 นำไฟล์ที่ได้มาดำเนินการต่อ: {main_file}")
         segment_files = split_audio(main_file, date_str, SEGMENT_DURATION)
         total_segments = len(segment_files)
         
@@ -161,6 +173,4 @@ if __name__ == "__main__":
             process_single_file(seg, idx, total_segments)
             time.sleep(2)
             
-        print("✨ ประมวลผลครบทุกไฟล์เรียบร้อยแล้ว!")
-    else:
-        print("❌ การบันทึกเสียงล้มเหลว หรือไม่มีข้อมูลถูกบันทึก")
+        print("✨ ประมวลผลและเตรียมไฟล์อัปโหลดเรียบร้อยแล้ว!")

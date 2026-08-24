@@ -2,13 +2,13 @@ name: CNBC Radio Auto Recorder
 
 on:
   schedule:
-    - cron: '30 18 * * *' # รันตี 1:30 ทุกวัน (เวลาไทย)
+    - cron: '0 23 * * *' # รันตี 1:30 ทุกวัน (เวลาไทย)
   workflow_dispatch:
     inputs:
       duration:
         description: 'ระยะเวลาที่ต้องการบันทึก (วินาที) เช่น 600 สำหรับ 10 นาที'
         required: false
-        default: '10800'
+        default: '14400'
         type: string
 
 jobs:

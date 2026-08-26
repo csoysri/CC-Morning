@@ -1,4 +1,4 @@
-name: CNBC Radio Auto Recorder
+name: CC Radio Auto Recorder
 
 on:
   schedule:

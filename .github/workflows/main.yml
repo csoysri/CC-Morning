@@ -1,9 +1,14 @@
 name: CC Radio Auto Recorder
 
-on:
+# on:
+#   schedule:
+#     - cron: '0 23 * * *' # รันเวลา 06:00 น. ทุกวัน (เวลาไทย)
+
+    on:
   schedule:
-    - cron: '0 23 * * *' # รันเวลา 06:00 น. ทุกวัน (เวลาไทย)
+    - cron: '52 4 * * *' # รันเวลา 11:50 น. ทุกวัน (เวลาไทย)
   workflow_dispatch: # กดรันเองได้ทันทีโดยไม่ต้องกรอกข้อมูล
+ 
 
 jobs:
   record_and_upload:

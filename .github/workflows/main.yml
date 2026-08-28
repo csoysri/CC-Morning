@@ -7,7 +7,7 @@ name: CC-Morning
 on:
   schedule:
     - cron: '18 6 * * *' # รันเวลา 13:15 น. ทุกวัน (เวลาไทย)
-  workflow_dispatch: # กดรันเองได้ทันทีโดยไม่ต้องกรอกข้อมูล
+ # workflow_dispatch: # กดรันเองได้ทันทีโดยไม่ต้องกรอกข้อมูล
 
 jobs:
   record_and_upload:

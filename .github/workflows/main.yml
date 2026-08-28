@@ -35,7 +35,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # กำหนดเวลาคงที่ไปเลย เช่น 10800 (3 ชั่วโมง) หรือ 14400 (4 ชั่วโมง)
-          RECORD_DURATION: '9000' 
+          RECORD_DURATION: '10800' 
         run: |
           python recorder.py
 

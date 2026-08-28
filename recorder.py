@@ -10,7 +10,7 @@ from google import genai
 
 TARGET_URL = "https://cdn-fr1-eu.lncoperations.ee/hls/cnbc_live/index.m3u8"
 
-# 🛠️ ตั้งเวลาทดสอบ: อัด 14400 วินาที / ตัดท่อนละ 420 15 วินาที
+# 🛠️ อัด 10800 วินาที (3 ชม.) / ตัดท่อนละ 420 วินาที (7 นาที)
 RECORD_DURATION = 10800
 SEGMENT_DURATION = 420
 
@@ -30,6 +30,7 @@ def record_stream(output_filename, duration):
 
     cmd = [
         'ffmpeg', '-y',
+        '-loglevel', 'error', # 🟢 ป้องกัน Log ล้น RAM ระหว่างอัด 3 ชั่วโมง
         '-headers', headers,
         '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
         '-reconnect', '1',
@@ -57,6 +58,7 @@ def split_audio(input_file, date_prefix, segment_time=15):
     
     cmd = [
         'ffmpeg', '-y',
+        '-loglevel', 'error', # 🟢 ป้องกัน Log ขยะ
         '-i', input_file,
         '-f', 'segment',
         '-segment_time', str(segment_time),
@@ -77,6 +79,7 @@ def transcribe_and_translate(audio_path, max_retries=3):
     print(f"  🤖 [1/3] กำลังส่งเสียงให้ Gemini ฟังและแปลไทย...")
     
     for attempt in range(1, max_retries + 1):
+        audio_file = None
         try:
             audio_file = client.files.upload(file=audio_path)
             
@@ -91,12 +94,12 @@ def transcribe_and_translate(audio_path, max_retries=3):
             7. ลบภาษาอังกฤษออก
             """
             
+            # 🟢 เปลี่ยนไปใช้ Model ล่าสุดที่มีอยู่จริง
             response = client.models.generate_content(
-                model='gemini-3.5-flash-lite',
+                model='gemini-2.0-flash', 
                 contents=[audio_file, prompt]
             )
             
-            client.files.delete(name=audio_file.name)
             return response.text
             
         except Exception as e:
@@ -105,9 +108,21 @@ def transcribe_and_translate(audio_path, max_retries=3):
                 time.sleep(attempt * 5)
             else:
                 return None
+        finally:
+            # 🟢 ใส่ finally เพื่อการันตีว่าไฟล์จะถูกลบออกจาก Storage เสมอ ป้องกันโควต้าเต็ม
+            if audio_file:
+                try:
+                    client.files.delete(name=audio_file.name)
+                except:
+                    pass
 
 async def text_to_speech_thai(text, output_audio_path):
     """สร้างไฟล์เสียงอ่านข่าวไทย"""
+    # 🟢 เช็คก่อนว่ามีข้อความให้พิมพ์ไหม ป้องกัน error จาก TTS
+    if not text or not text.strip():
+        print("  ⚠️ ไม่มีข้อความให้สร้างเสียง")
+        return
+        
     print(f"  🗣️ [3/3] กำลังสร้างไฟล์เสียงอ่านข่าวไทย: {output_audio_path}...")
     try:
         voice = "th-TH-PremwadeeNeural"
@@ -149,7 +164,8 @@ if __name__ == "__main__":
         
         for idx, seg in enumerate(segment_files, start=1):
             process_single_file(seg, idx, total_segments)
-            time.sleep(2)
+            # 🟢 พัก 5 วินาที ลดความเสี่ยงการโดนแบน (Rate Limit) จาก API
+            time.sleep(5) 
             
         print("✨ ประมวลผลครบทุกไฟล์เรียบร้อยแล้ว!")
     else:

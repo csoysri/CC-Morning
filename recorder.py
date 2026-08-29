@@ -96,7 +96,7 @@ def transcribe_and_translate(audio_path, max_retries=3):
             
             # 🟢 เปลี่ยนไปใช้ Model ล่าสุดที่มีอยู่จริง
             response = client.models.generate_content(
-                model='gemini-2.0-flash', 
+                model='gemini-3.5-flash-lite', 
                 contents=[audio_file, prompt]
             )
             

@@ -10,8 +10,8 @@ from google import genai
 
 TARGET_URL = "https://cdn-fr1-eu.lncoperations.ee/hls/cnbc_live/index.m3u8"
 
-# 🛠️ อัด 10800 วินาที (3 ชม.) / ตัดท่อนละ 420 วินาที (7 นาที)
-RECORD_DURATION = 10800
+# 🛠️ อัด 14400 วินาที (4 ชม.) / ตัดท่อนละ 420 วินาที (7 นาที)
+RECORD_DURATION = 14400
 SEGMENT_DURATION = 420
 
 # 🔑 ดึง Key จาก GitHub Secret อัตโนมัติ

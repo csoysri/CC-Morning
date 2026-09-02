@@ -51,10 +51,11 @@ def record_stream(output_filename, duration):
 
     return os.path.exists(output_filename) and os.path.getsize(output_filename) > 0
 
-def split_audio(input_file, date_prefix, segment_time=15):
+def split_audio(input_file, folder_name, date_prefix, segment_time=15):
     """ตัดแบ่งไฟล์เสียง .mp3"""
     print(f"\n✂️ กำลังตัดแบ่งไฟล์ '{input_file}' เป็นท่อนละ {segment_time} วินาที...")
-    output_pattern = f"./{date_prefix}_part_%03d.mp3"
+    # บันทึกไฟล์ลงใน Folder ที่กำหนด
+    output_pattern = f"{folder_name}/{date_prefix}_part_%03d.mp3"
 
     cmd = [
         'ffmpeg', '-y',
@@ -66,7 +67,7 @@ def split_audio(input_file, date_prefix, segment_time=15):
         output_pattern
     ]
     subprocess.run(cmd, check=True)
-    segments = sorted(glob.glob(f"./{date_prefix}_part_*.mp3"))
+    segments = sorted(glob.glob(f"{folder_name}/{date_prefix}_part_*.mp3"))
     print(f"🎉 ตัดไฟล์สำเร็จ! ได้ทั้งหมด {len(segments)} ไฟล์\n")
     return segments
 
@@ -154,21 +155,21 @@ def process_single_file(seg_path, current_idx, total_files):
     print(f"🎉 เสร็จสิ้นขั้นตอนของไฟล์ [{current_idx}/{total_files}]\n")
     return result_tts
 
-def concatenate_audio(tts_files, output_filename):
+def concatenate_audio(tts_files, output_filename, folder_name):
     """นำไฟล์ mp3 ที่อ่านข่าวไทยทั้งหมดมาต่อกันเป็นไฟล์เดียว"""
     if not tts_files:
         print("⚠️ ไม่มีไฟล์เสียงสำหรับนำมารวมกัน")
         return
 
     print(f"\n🔗 กำลังรวมไฟล์เสียงพากย์ไทยทั้งหมด {len(tts_files)} ไฟล์...")
-    list_file = "concat_list.txt"
+    list_file = f"{folder_name}/concat_list.txt"
     
     # สร้างไฟล์ list สำหรับ ffmpeg
     with open(list_file, "w", encoding="utf-8") as f:
         for audio_file in tts_files:
             # ใช้ relative path ให้ถูกต้องสำหรับ ffmpeg
             safe_path = audio_file.replace("\\", "/")
-            f.write(f"file '{safe_path}'\n")
+            f.write(f"file '{os.path.basename(safe_path)}'\n") # อ้างอิงไฟล์ในโฟลเดอร์เดียวกัน
 
     cmd = [
         'ffmpeg', '-y',
@@ -180,7 +181,8 @@ def concatenate_audio(tts_files, output_filename):
         output_filename
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    # รันคำสั่ง ffmpeg โดยกำหนด working directory เป็นโฟลเดอร์นั้น
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=folder_name)
     
     if result.returncode == 0 and os.path.exists(output_filename):
         print(f"✅ รวมไฟล์เสียงเสร็จสมบูรณ์! ไฟล์ปลายทาง: {output_filename}")
@@ -194,13 +196,25 @@ def concatenate_audio(tts_files, output_filename):
 if __name__ == "__main__":
     th_time = datetime.now(ZoneInfo("Asia/Bangkok"))
     date_str = th_time.strftime('%Y%m%d_%H%M%S')
-    main_file = f"./raw_cnbc_{date_str}.mp3"
+    
+    # 🟢 สร้างชื่อโฟลเดอร์จาก [ชื่อไฟล์ YML]_[เวลา-นาที]
+    yml_name = os.getenv("GITHUB_WORKFLOW", "recording_job").replace(" ", "_")
+    time_min_str = th_time.strftime('%H-%M')
+    folder_name = f"./{yml_name}_{time_min_str}"
+    
+    # สร้างโฟลเดอร์
+    os.makedirs(folder_name, exist_ok=True)
+    print(f"📁 สร้างโฟลเดอร์สำหรับทำงาน: {folder_name}")
+
+    # กำหนดที่อยู่ไฟล์หลักให้อยู่ในโฟลเดอร์
+    main_file = f"{folder_name}/raw_cnbc_{date_str}.mp3"
 
     success = record_stream(main_file, RECORD_DURATION)
 
     if success:
         print(f"✅ บันทึกไฟล์หลักสำเร็จ: {main_file}")
-        segment_files = split_audio(main_file, date_str, SEGMENT_DURATION)
+        # ส่ง folder_name เข้าไปในฟังก์ชัน split_audio
+        segment_files = split_audio(main_file, folder_name, date_str, SEGMENT_DURATION)
         total_segments = len(segment_files)
 
         # 🟢 ตัวแปรสำหรับเก็บรายชื่อไฟล์เสียงที่สร้างสำเร็จ
@@ -217,8 +231,8 @@ if __name__ == "__main__":
 
         # 🟢 เมื่อประมวลผลเสร็จทุกไฟล์ ให้นำมาต่อรวมกัน
         if successful_tts_files:
-            final_output_file = f"./final_thai_news_{date_str}.mp3"
-            concatenate_audio(successful_tts_files, final_output_file)
+            final_output_file = f"{folder_name}/final_thai_news_{date_str}.mp3"
+            concatenate_audio(successful_tts_files, final_output_file, folder_name)
 
         print("✨ ประมวลผลและรวมไฟล์เสร็จสิ้นเรียบร้อยแล้ว!")
     else:

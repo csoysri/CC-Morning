@@ -4,6 +4,7 @@ import glob
 import time
 import asyncio
 import edge_tts
+import shutil  # เพิ่ม import shutil สำหรับการย้าย/คัดลอกไฟล์
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from google import genai
@@ -149,32 +150,18 @@ def process_single_file(seg_path, current_idx, total_files):
     
     return tts_filename
 
-def merge_and_cleanup_tts(tts_files, output_filename, folder_name):
-    """
-    รวมไฟล์เสียงอ่านข่าวทั้งหมดด้วย Filter Complex Concat
-    แก้ปัญหาเวลาเพี้ยน และเสียงวนซ้ำตรงรอยต่อไฟล์อย่างสมบูรณ์
-    """
-    print(f"==================================================")
-    print(f"🔗 กำลังรวมไฟล์เสียงอ่านข่าวทั้งหมด {len(tts_files)} ไฟล์ (ระบบไร้รอยต่อ)...")
-
-    if not tts_files:
-        print("⚠️ ไม่มีไฟล์เสียงสำหรับรวม")
-        return
-
-    # กรณีมีไฟล์เดียว ให้ย้าย/เปลี่ยนชื่อได้ทันที
-    if len(tts_files) == 1:
-        shutil.move(tts_files[0], output_filename)
-        print(f"✅ มีเพียงไฟล์เดียว บันทึกสำเร็จ: {output_filename}")
-        return
+# --- 🛠️ ฟังก์ชันใหม่สำหรับต่อไฟล์เสียงแบบอเนกประสงค์ ---
+def concat_audio_files(input_files, output_filename):
+    """ฟังก์ชันย่อยสำหรับรวมไฟล์เสียงด้วย FFmpeg"""
+    if len(input_files) == 1:
+        shutil.copy(input_files[0], output_filename)
+        return True
 
     cmd = ['ffmpeg', '-y']
-
-    # 1. ป้อน input เข้าทีละไฟล์
-    for f in tts_files:
+    for f in input_files:
         cmd.extend(['-i', os.path.abspath(f)])
 
-    # 2. ผูก Filter Concat เข้าด้วยกัน (Decode เป็น PCM ก่อนต่อ)
-    n = len(tts_files)
+    n = len(input_files)
     filter_inputs = "".join([f"[{i}:a]" for i in range(n)])
     filter_str = f"{filter_inputs}concat=n={n}:v=0:a=1[outa]"
 
@@ -183,26 +170,83 @@ def merge_and_cleanup_tts(tts_files, output_filename, folder_name):
         '-map', '[outa]',
         '-c:a', 'libmp3lame',
         '-b:a', '128k',
-        '-ar', '44100',          # บังคับ Sample Rate เท่ากัน ป้องกันเวลาเพี้ยน
-        '-ac', '2',              # บังคับ Stereo เท่ากันทุกไฟล์
-        '-map_metadata', '-1',   # ลบ Metadata เก่าที่ฝังตรงรอยต่อของแต่ละพาร์ท
+        '-ar', '44100',
+        '-ac', '2',
+        '-map_metadata', '-1',
         output_filename
     ])
 
     result = subprocess.run(cmd, capture_output=True, text=True)
+    return result.returncode == 0 and os.path.exists(output_filename)
 
-    if result.returncode == 0 and os.path.exists(output_filename):
-        print(f"✅ รวมไฟล์เสียงสำเร็จสมบูรณ์: {output_filename}")
-        
-        # ลบเฉพาะไฟล์ย่อยที่นำมารวมแล้ว
-        for tts in tts_files:
-            try:
-                os.remove(tts)
-                print(f"  🗑️ ลบไฟล์ย่อย: {tts}")
-            except Exception as e:
-                print(f"  ⚠️ ไม่สามารถลบไฟล์ {tts} ได้: {e}")
+def merge_and_cleanup_tts(tts_files, final_output_filename, folder_name):
+    """
+    รวมไฟล์เสียงอ่านข่าวโดยแบ่งทำทีละ 10 ไฟล์ 
+    เพื่อลดภาระของ FFmpeg และป้องกันบั๊กเมื่อรวมไฟล์จำนวนมากพร้อมกัน
+    """
+    print(f"==================================================")
+    print(f"🔗 กำลังรวมไฟล์เสียงทั้งหมด {len(tts_files)} ไฟล์ (แบ่งทำทีละ 10 ไฟล์)...")
+
+    if not tts_files:
+        print("⚠️ ไม่มีไฟล์เสียงสำหรับรวม")
+        return
+
+    # กรณีมีไฟล์เดียว
+    if len(tts_files) == 1:
+        shutil.move(tts_files[0], final_output_filename)
+        print(f"✅ มีเพียงไฟล์เดียว บันทึกสำเร็จ: {final_output_filename}")
+        return
+
+    batch_size = 10
+    intermediate_files = []
+
+    # 1. แบ่งกลุ่มไฟล์ทีละ 10 ไฟล์
+    for i in range(0, len(tts_files), batch_size):
+        batch = tts_files[i:i + batch_size]
+        batch_num = (i // batch_size) + 1
+        temp_output = os.path.join(folder_name, f"temp_batch_{batch_num}.mp3")
+
+        print(f"  ⏳ กำลังรวมกลุ่มที่ {batch_num} ({len(batch)} ไฟล์) -> {os.path.basename(temp_output)} ...")
+        success = concat_audio_files(batch, temp_output)
+
+        if success:
+            intermediate_files.append(temp_output)
+            # ลบไฟล์ย่อยเฉพาะใน batch ที่รวมสำเร็จแล้ว
+            for f in batch:
+                try:
+                    os.remove(f)
+                except Exception as e:
+                    pass
+        else:
+            print(f"  ❌ รวมกลุ่มที่ {batch_num} ล้มเหลว!")
+
+    # 2. นำไฟล์ชั่วคราว (temp_batch_X) มารวมกันเป็นไฟล์สุดท้าย
+    if not intermediate_files:
+        print("❌ ไม่สามารถสร้างไฟล์ชั่วคราวได้เลย ยกเลิกการรวมไฟล์")
+        return
+
+    print(f"==================================================")
+    print(f"🔗 กำลังรวมไฟล์กลุ่มย่อยทั้งหมด {len(intermediate_files)} ไฟล์ เป็นไฟล์สุดท้าย...")
+    
+    if len(intermediate_files) == 1:
+        # ถ้ามีแค่ batch เดียว (ไฟล์ต้นทาง < 10) ก็แค่เปลี่ยนชื่อ
+        shutil.move(intermediate_files[0], final_output_filename)
+        print(f"✅ รวมไฟล์สำเร็จสมบูรณ์: {final_output_filename}")
     else:
-        print(f"❌ การรวมไฟล์ล้มเหลว: {result.stderr}")
+        # ถ้าน้อยกว่าหรือเท่ากับ 10 batch รวมกันได้เลย
+        final_success = concat_audio_files(intermediate_files, final_output_filename)
+        
+        if final_success:
+            print(f"✅ รวมไฟล์สำเร็จสมบูรณ์: {final_output_filename}")
+            # ลบไฟล์ temp_batch ทิ้ง
+            for f in intermediate_files:
+                try:
+                    os.remove(f)
+                    print(f"  🗑️ ลบไฟล์กลุ่มย่อย: {os.path.basename(f)}")
+                except:
+                    pass
+        else:
+            print("❌ การรวมไฟล์ขั้นสุดท้ายล้มเหลว")
 
 if __name__ == "__main__":
     th_time = datetime.now(ZoneInfo("Asia/Bangkok"))

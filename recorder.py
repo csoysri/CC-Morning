@@ -55,7 +55,8 @@ def split_audio(input_file, date_prefix, folder_name, segment_time=420):
     """ตัดแบ่งไฟล์เสียง .mp3 พร้อมจัดเรียง timestamp รอยต่อให้สะอาด"""
     print(f"\n✂️ กำลังตัดแบ่งไฟล์ '{input_file}' เป็นท่อนละ {segment_time} วินาที...")
     
-    output_pattern = os.path.join(folder_name, f"{date_prefix}_part_%03d.mp3")
+    # แก้ไขให้นำคำว่า part_ ขึ้นต้นชื่อไฟล์
+    output_pattern = os.path.join(folder_name, f"part_{date_prefix}_%03d.mp3")
 
     # เพิ่ม -avoid_negative_ts make_zero เพื่อป้องกันปัญหา Timestamp ติดลบ/สะดุดรอยต่อ
     cmd = [
@@ -69,7 +70,8 @@ def split_audio(input_file, date_prefix, folder_name, segment_time=420):
     ]
     subprocess.run(cmd, check=True)
     
-    segments = sorted(glob.glob(os.path.join(folder_name, f"{date_prefix}_part_*.mp3")))
+    # อัปเดตแพทเทิร์นค้นหาไฟล์ให้ตรงกับชื่อไฟล์ใหม่
+    segments = sorted(glob.glob(os.path.join(folder_name, f"part_{date_prefix}_*.mp3")))
     print(f"🎉 ตัดไฟล์สำเร็จ! ได้ทั้งหมด {len(segments)} ไฟล์\n")
     return segments
 
@@ -98,7 +100,7 @@ def transcribe_and_translate(audio_path, max_retries=3):
             """
 
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-3.5-flash-lite',
                 contents=[audio_file, prompt]
             )
 

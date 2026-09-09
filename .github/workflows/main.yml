@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      # 🎬 ติดตั้ง FFmpeg สำหรับอัดและแปลงเสียง
+      # 🎬 ติดตั้ง FFmpeg สำหรับอัด แปลงเสียง และรวมไฟล์เสียง
       - name: Install FFmpeg
         run: |
           sudo apt-get update
@@ -39,12 +39,35 @@ jobs:
         run: |
           python recorder.py
 
+      # 🎵 ตรวจสอบและรวมไฟล์ MP3 ทั้งหมดเป็นไฟล์เดียว (ป้องกันไฟล์แยก)
+      - name: Merge MP3 files
+        run: |
+          count=$(ls -1 *.mp3 2>/dev/null | wc -l)
+          if [ "$count" -gt 1 ]; then
+            echo "=== พบไฟล์ MP3 จำนวน $count ไฟล์ กำลังดำเนินการรวมเป็นไฟล์เดียว ==="
+            # สร้างลิสต์รายชื่อไฟล์ mp3 ทั้งหมด
+            ls -1 *.mp3 | while read filename; do echo "file '$filename'" >> mylist.txt; done
+            
+            # ตั้งชื่อไฟล์ผลลัพธ์
+            DATE_STR=$(TZ='Asia/Bangkok' date +'%Y-%m-%d')
+            OUTPUT_FILE="CC-Morning_$DATE_STR.mp3"
+            
+            # ใช้ FFmpeg รวมไฟล์เข้าด้วยกัน (ใช้ -c copy เพื่อความรวดเร็วและไม่ลดคุณภาพ)
+            ffmpeg -f concat -safe 0 -i mylist.txt -c copy "$OUTPUT_FILE"
+            
+            # ลบไฟล์ MP3 ย่อยออก เพื่อป้องกันการอัปโหลดซ้ำซ้อน
+            find . -maxdepth 1 -name "*.mp3" ! -name "$OUTPUT_FILE" -type f -delete
+            echo "=== รวมไฟล์เสร็จสิ้น: ได้ไฟล์ $OUTPUT_FILE ==="
+          else
+            echo "=== มีไฟล์ MP3 จำนวน $count ไฟล์ (หรือไม่พบไฟล์) ไม่จำเป็นต้องรวม ==="
+          fi
+
       # ☁️ ติดตั้ง Rclone
       - name: Install Rclone
         run: |
           sudo -v ; curl https://rclone.org/install.sh | sudo bash
 
-      # 📤 อัปโหลดเข้า Google Drive
+      # 📤 อัปโหลดเข้า Google Drive (ระบุโฟลเดอร์ CNBC/CC-Morning)
       - name: Setup Rclone and Upload
         env:
           RCLONE_CONF_DATA: ${{ secrets.RCLONE_CONFIG }}
@@ -52,8 +75,10 @@ jobs:
           mkdir -p ~/.config/rclone
           echo "$RCLONE_CONF_DATA" > ~/.config/rclone/rclone.conf
 
-          TARGET_FOLDER="CNBC/$(TZ='Asia/Bangkok' date +'%Y-%m-%d')"
+          # สร้างตัวแปร Folder ปลายทาง ให้อยู่ใน CNBC/CC-Morning
+          TARGET_FOLDER="CNBC/CC-Morning/$(TZ='Asia/Bangkok' date +'%Y-%m-%d')"
 
           echo "=== กำลังย้ายไฟล์ทั้งหมดเข้าโฟลเดอร์: $TARGET_FOLDER ==="
 
+          # ใช้ move ย้ายไฟล์ที่ผ่านการรวมแล้วเข้า Google Drive
           rclone move ./ "mydrive:$TARGET_FOLDER" --include "*.mp3" --include "*.txt" --verbose

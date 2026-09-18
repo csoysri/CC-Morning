@@ -13,7 +13,7 @@ from google import genai
 
 TARGET_URL = "https://cdn-fr1-eu.lncoperations.ee/hls/cnbc_live/index.m3u8" 
 
-# 🛠️ ตั้งเวลา: อัด 3 ชั่วโมง (10800 วินาที) / ตัดท่อนละ 7 นาที (420 วินาที)
+# 🛠️ ตั้งเวลา: อัด 4 ชั่วโมง (14400 วินาที) / ตัดท่อนละ 7 นาที (420 วินาที)
 RECORD_DURATION = 14400  
 SEGMENT_DURATION = 420
 
@@ -195,8 +195,8 @@ def concat_audio_files_safe(input_files, output_filename, temp_work_dir):
 
     return os.path.exists(output_filename) and os.path.getsize(output_filename) > 0
 
-def merge_and_cleanup_tts(tts_files, final_output_filename, folder_name):
-    """รวมไฟล์เสียงอ่านข่าวทั้งหมด แล้วลบไฟล์ย่อยเฉพาะที่รวมเสร็จแล้ว"""
+def merge_and_keep_tts(tts_files, final_output_filename, folder_name):
+    """รวมไฟล์เสียงอ่านข่าวทั้งหมดเข้าด้วยกัน โดยเก็บไฟล์ย่อย _อ่านข่าวไทย.mp3 ไว้ทั้งหมด ไม่ลบทิ้ง"""
     print(f"==================================================")
     print(f"🔗 กำลังรวมไฟล์เสียงอ่านข่าวทั้งหมด {len(tts_files)} ไฟล์...")
 
@@ -211,12 +211,7 @@ def merge_and_cleanup_tts(tts_files, final_output_filename, folder_name):
 
     if success:
         print(f"✅ รวมไฟล์เสียงอ่านข่าวสมบูรณ์ 100%: {final_output_filename}")
-        # ลบเฉพาะไฟล์ _อ่านข่าวไทย.mp3 รายท่อนทิ้ง เพื่อไม่ให้รกโฟลเดอร์
-        for f in tts_files:
-            try:
-                os.remove(f)
-            except Exception:
-                pass
+        print("📁 เก็บรักษาไฟล์เสียงอ่านข่าวรายท่อนไว้ครบถ้วน (ไม่มีการลบ)")
     else:
         print("❌ การรวมไฟล์ขั้นสุดท้ายล้มเหลว (ไฟล์ต้นฉบับยังคงอยู่ครบถ้วน)")
 
@@ -241,8 +236,7 @@ if __name__ == "__main__":
     else:
         target_dir = os.path.join("CNBC", clean_workflow_name, date_folder, time_folder)
 
-    # 3. 🛡️ จุดสำคัญที่สุด: สร้าง Local Work Directory ในเครื่องก่อนเสมอ
-    # เพื่อป้องกันไม่ให้ FFmpeg อ่าน/เขียนสะดุดบน Google Drive เสมือน
+    # 3. 🛡️ สร้าง Local Work Directory ในเครื่องก่อนเสมอ
     local_work_dir = os.path.join(tempfile.gettempdir(), f"CNBC_WORK_{date_str}")
     os.makedirs(local_work_dir, exist_ok=True)
     print(f"📁 พื้นที่ประมวลผลชั่วคราว (Local Fast I/O): {local_work_dir}")
@@ -267,10 +261,10 @@ if __name__ == "__main__":
 
         print("✨ ประมวลผลและแปลครบทุกไฟล์เรียบร้อยแล้ว!")
         
-        # รวมไฟล์เสียงอ่านข่าวทั้งหมดในเครื่องก่อน
+        # รวมไฟล์เสียงอ่านข่าวทั้งหมดในเครื่องก่อน (โดยคงไฟล์ย่อยไว้ครบ)
         if generated_tts_files:
             final_audio = os.path.join(local_work_dir, f"final_thai_news_{date_str}.mp3")
-            merge_and_cleanup_tts(generated_tts_files, final_audio, local_work_dir)
+            merge_and_keep_tts(generated_tts_files, final_audio, local_work_dir)
 
         # 4. 🚚 ย้ายไฟล์ทั้งหมดที่เสร็จสมบูรณ์ 100% เข้า Google Drive ปลายทาง
         print(f"\n🚚 กำลังย้ายไฟล์ทั้งหมดไปยังเป้าหมาย: {target_dir} ...")

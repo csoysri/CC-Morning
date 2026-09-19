@@ -150,50 +150,70 @@ def process_single_file(seg_path, current_idx, total_files):
     
     return tts_filename
 
-# --- 🛠️ ฟังก์ชันรวมไฟล์ที่ปลอดภัย 100% ด้วย Concat Demuxer + Re-encode ---
+# --- 🛠️ ฟังก์ชันรวมไฟล์ที่ปลอดภัย แก้ไขปัญหา Non-ASCII และ Invalid Argument ---
 def concat_audio_files_safe(input_files, output_filename, temp_work_dir):
     """
-    รวมไฟล์เสียงโดยใช้ Concat Demuxer (ไฟล์ลิสต์ .txt)
-    ป้องกันปัญหา Command line ยาวเกินไป และ Re-encode เพื่อให้ Timestamp ลื่นไหลไม่กระตุก
+    รวมไฟล์เสียงโดยใช้ Concat Demuxer ผ่าน Safe ASCII Symlinks/Copies
+    แก้ปัญหา FFmpeg บน Linux ไม่รองรับภาษาไทยใน concat list file
     """
-    if not input_files:
+    # 1. กรองเอาเฉพาะไฟล์ที่มีอยู่จริงและขนาดมากกว่า 1KB
+    valid_files = [f for f in input_files if os.path.exists(f) and os.path.getsize(f) > 1024]
+    
+    if not valid_files:
+        print("  ⚠️ ไม่มีไฟล์เสียงที่สมบูรณ์พอที่จะทำการรวมได้")
         return False
 
-    if len(input_files) == 1:
-        shutil.copy(input_files[0], output_filename)
+    if len(valid_files) == 1:
+        shutil.copy(valid_files[0], output_filename)
         return True
 
-    # สร้างไฟล์รายชื่อชั่วคราว
-    list_path = os.path.join(temp_work_dir, "concat_list.txt")
-    with open(list_path, "w", encoding="utf-8") as f:
-        for file_path in input_files:
-            # แปลง Path ให้ FFmpeg เข้าใจแน่นอนบน Windows (ใช้ slash '/')
-            clean_path = os.path.abspath(file_path).replace("\\", "/")
-            f.write(f"file '{clean_path}'\n")
+    # สร้างโฟลเดอร์ชั่วคราวสำหรับทำ Symlink/ชื่อไฟล์ ASCII
+    safe_concat_dir = os.path.join(temp_work_dir, "safe_concat_temp")
+    os.makedirs(safe_concat_dir, exist_ok=True)
 
-    cmd = [
-        'ffmpeg', '-y',
-        '-f', 'concat',
-        '-safe', '0',
-        '-i', list_path,
-        '-c:a', 'libmp3lame',
-        '-b:a', '128k',
-        '-ar', '44100',
-        '-ac', '2',
-        output_filename
-    ]
+    list_path = os.path.join(safe_concat_dir, "concat_list.txt")
+    temp_link_files = []
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    
-    # ลบไฟล์ list ชั่วคราวทิ้ง
-    if os.path.exists(list_path):
-        os.remove(list_path)
+    try:
+        with open(list_path, "w", encoding="utf-8") as f:
+            for idx, orig_file in enumerate(valid_files):
+                ascii_name = f"seq_{idx:04d}.mp3"
+                ascii_link = os.path.join(safe_concat_dir, ascii_name)
+                
+                # ทำ Symlink (หรือ fallback เป็น hardlink/copy หาก OS ไม่รองรับ)
+                try:
+                    os.symlink(os.path.abspath(orig_file), ascii_link)
+                except Exception:
+                    shutil.copy2(orig_file, ascii_link)
+                
+                temp_link_files.append(ascii_link)
+                # เขียนชื่อไฟล์สัมพัทธ์ (Relative path) ลง list ปลอดภัยต่อ FFmpeg ที่สุด
+                f.write(f"file '{ascii_name}'\n")
 
-    if result.returncode != 0:
-        print(f"❌ FFmpeg Concat Error:\n{result.stderr}")
-        return False
+        cmd = [
+            'ffmpeg', '-y',
+            '-f', 'concat',
+            '-safe', '0',
+            '-i', 'concat_list.txt',
+            '-c:a', 'libmp3lame',
+            '-b:a', '128k',
+            '-ar', '44100',
+            '-ac', '2',
+            os.path.abspath(output_filename)
+        ]
 
-    return os.path.exists(output_filename) and os.path.getsize(output_filename) > 0
+        # รัน FFmpeg จากใน safe_concat_dir โดยตรง
+        result = subprocess.run(cmd, cwd=safe_concat_dir, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            print(f"❌ FFmpeg Concat Error:\n{result.stderr}")
+            return False
+
+        return os.path.exists(output_filename) and os.path.getsize(output_filename) > 0
+
+    finally:
+        # เคลียร์โฟลเดอร์ชั่วคราวที่ใช้รวมไฟล์ทิ้งเสมอ
+        shutil.rmtree(safe_concat_dir, ignore_errors=True)
 
 def merge_and_keep_tts(tts_files, final_output_filename, folder_name):
     """รวมไฟล์เสียงอ่านข่าวทั้งหมดเข้าด้วยกัน โดยเก็บไฟล์ย่อย _อ่านข่าวไทย.mp3 ไว้ทั้งหมด ไม่ลบทิ้ง"""
@@ -204,7 +224,7 @@ def merge_and_keep_tts(tts_files, final_output_filename, folder_name):
         print("⚠️ ไม่มีไฟล์เสียงสำหรับรวม")
         return
 
-    # ให้เวลา Windows คลาย Lock ไฟล์
+    # ให้เวลาคลาย Lock ไฟล์
     time.sleep(1)
 
     success = concat_audio_files_safe(tts_files, final_output_filename, folder_name)
@@ -255,7 +275,7 @@ if __name__ == "__main__":
 
         for idx, seg in enumerate(segment_files, start=1):
             tts_file = process_single_file(seg, idx, total_segments)
-            if tts_file and os.path.exists(tts_file):
+            if tts_file and os.path.exists(tts_file) and os.path.getsize(tts_file) > 0:
                 generated_tts_files.append(tts_file)
             time.sleep(1)
 
